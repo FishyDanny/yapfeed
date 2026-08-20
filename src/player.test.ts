@@ -62,6 +62,54 @@ describe('eyes-closed controls', () => {
     expect(sleepCheckDelay(1_201_000, 1_800_000, 15_000)).toBe(0);
   });
 
+  it('registers lock-screen seek actions with the offset the browser supplies', () => {
+    const actions = new Map<string, MediaSessionActionHandler | null>();
+    const session = {
+      setActionHandler(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
+        actions.set(action, handler);
+      },
+    };
+    const seeks: number[] = [];
+    const positions: number[] = [];
+
+    registerMediaSessionHandlers(session, {
+      play: () => undefined,
+      pause: () => undefined,
+      next: () => undefined,
+      previous: () => undefined,
+      seekBy: (offset) => seeks.push(offset),
+      seekTo: (position) => positions.push(position),
+    });
+
+    actions.get('seekbackward')?.({ action: 'seekbackward' });
+    actions.get('seekforward')?.({ action: 'seekforward', seekOffset: 30 });
+    actions.get('seekto')?.({ action: 'seekto', seekTime: 42 });
+    actions.get('seekto')?.({ action: 'seekto' });
+
+    expect(seeks).toEqual([-15, 30]);
+    expect(positions).toEqual([42]);
+  });
+
+  it('omits seek actions when the player does not offer them', () => {
+    const actions = new Map<string, MediaSessionActionHandler | null>();
+
+    registerMediaSessionHandlers(
+      {
+        setActionHandler(action: MediaSessionAction, handler: MediaSessionActionHandler | null) {
+          actions.set(action, handler);
+        },
+      },
+      {
+        play: () => undefined,
+        pause: () => undefined,
+        next: () => undefined,
+        previous: () => undefined,
+      },
+    );
+
+    expect([...actions.keys()]).toEqual(['play', 'pause', 'nexttrack', 'previoustrack']);
+  });
+
   it('registers play, pause, next and previous lock-screen actions', () => {
     const actions = new Map<string, MediaSessionActionHandler | null>();
     const session = {

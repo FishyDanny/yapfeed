@@ -1,3 +1,4 @@
+import { SEEK_STEP_S } from './seek';
 import type { Clip } from './types';
 
 export interface PlayerControls {
@@ -5,6 +6,8 @@ export interface PlayerControls {
   pause: () => void;
   next: () => void;
   previous: () => void;
+  seekBy?: (offsetSeconds: number) => void;
+  seekTo?: (positionSeconds: number) => void;
 }
 
 export interface MediaSessionPort {
@@ -89,12 +92,27 @@ export function registerMediaSessionHandlers(
 ): boolean {
   if (session === undefined) return false;
 
+  const { seekBy, seekTo } = controls;
   const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
     ['play', () => controls.play()],
     ['pause', () => controls.pause()],
     ['nexttrack', () => controls.next()],
     ['previoustrack', () => controls.previous()],
   ];
+  if (seekBy !== undefined) {
+    actions.push(
+      ['seekbackward', (details) => seekBy(-(details.seekOffset ?? SEEK_STEP_S))],
+      ['seekforward', (details) => seekBy(details.seekOffset ?? SEEK_STEP_S)],
+    );
+  }
+  if (seekTo !== undefined) {
+    actions.push([
+      'seekto',
+      (details) => {
+        if (details.seekTime !== undefined) seekTo(details.seekTime);
+      },
+    ]);
+  }
   let installed = false;
   for (const [action, handler] of actions) {
     try {

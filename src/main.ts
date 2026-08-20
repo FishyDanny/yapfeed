@@ -20,13 +20,28 @@ import {
   SEEK_STEP_S,
   type SeekGate,
 } from './seek';
+import {
+  DEFAULT_PLAYBACK_RATE,
+  formatRate,
+  normaliseRate,
+  PLAYBACK_RATES,
+  type PlaybackRate,
+} from './rate';
 import { getOrCreateSessionId, hashSessionId } from './session';
-import { readIdList, toggleId, appendId, writeIdList, writeValue } from './storage';
+import {
+  appendId,
+  readIdList,
+  readValue,
+  toggleId,
+  writeIdList,
+  writeValue,
+} from './storage';
 import type { Clip, SubmissionInput } from './types';
 
 const LIKES_STORAGE_KEY = 'yapfeed.likes';
 const SKIPS_STORAGE_KEY = 'yapfeed.skips';
 const CURRENT_CLIP_STORAGE_KEY = 'yapfeed.current.clip';
+const RATE_STORAGE_KEY = 'yapfeed.rate';
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -84,15 +99,27 @@ app.innerHTML = `
         <strong aria-hidden="true">→</strong>
         <small>or press Space</small>
       </button>
-      <div class="sleep-panel">
-        <p>SLEEP AFTER</p>
-        <div class="sleep-options" aria-label="Sleep timer">
-          <button type="button" data-minutes="10">10m</button>
-          <button type="button" data-minutes="20">20m</button>
-          <button type="button" data-minutes="30">30m</button>
-          <button type="button" data-minutes="0">Off</button>
+      <div class="panel-stack">
+        <div class="sleep-panel">
+          <p>SLEEP AFTER</p>
+          <div class="sleep-options" aria-label="Sleep timer">
+            <button type="button" data-minutes="10">10m</button>
+            <button type="button" data-minutes="20">20m</button>
+            <button type="button" data-minutes="30">30m</button>
+            <button type="button" data-minutes="0">Off</button>
+          </div>
+          <span id="sleep-status">No timer set</span>
         </div>
-        <span id="sleep-status">No timer set</span>
+        <div class="speed-panel">
+          <p>SPEED</p>
+          <div class="speed-options" aria-label="Playback speed">
+            ${PLAYBACK_RATES.map(
+              (rate) =>
+                `<button type="button" data-rate="${rate}" aria-pressed="${String(rate === DEFAULT_PLAYBACK_RATE)}">${formatRate(rate)}</button>`,
+            ).join('')}
+          </div>
+          <span id="speed-status">Normal speed</span>
+        </div>
       </div>
     </aside>
   </section>
@@ -164,6 +191,7 @@ const feedCount = requiredElement<HTMLElement>('#feed-count');
 const queuePosition = requiredElement<HTMLElement>('#queue-position');
 const playerStatus = requiredElement<HTMLElement>('#player-status');
 const sleepStatus = requiredElement<HTMLElement>('#sleep-status');
+const speedStatus = requiredElement<HTMLElement>('#speed-status');
 const submissionDialog = requiredElement<HTMLDialogElement>('#submission-dialog');
 const submissionForm = requiredElement<HTMLFormElement>('#submission-form');
 const submissionResult = requiredElement<HTMLElement>('#submission-result');
@@ -174,7 +202,7 @@ let sessionHash = '';
 let isPlaying = false;
 let sleepTimer: ReturnType<typeof setTimeout> | undefined;
 let sleepDeadlineMs: number | null = null;
-let intendedRate = 1;
+let intendedRate: PlaybackRate = normaliseRate(readValue(localStorage, RATE_STORAGE_KEY));
 let pendingSeekTargetS: number | null = null;
 let seekFlushTimer: ReturnType<typeof setTimeout> | undefined;
 const seekGate: SeekGate = { seeking: false, lastCommitMs: null };
@@ -256,6 +284,18 @@ async function togglePlayback(forcePlay = false): Promise<void> {
 function applyIntendedRate(): void {
   const correction = rateCorrection(audio.playbackRate, intendedRate);
   if (correction !== null) audio.playbackRate = correction;
+}
+
+function setPlaybackRate(rate: PlaybackRate): void {
+  // The intended rate is recorded first because applyIntendedRate runs on the
+  // ratechange this triggers and would otherwise undo the listener's choice.
+  intendedRate = rate;
+  audio.playbackRate = rate;
+  writeValue(localStorage, RATE_STORAGE_KEY, String(rate));
+  document.querySelectorAll<HTMLButtonElement>('[data-rate]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(normaliseRate(button.dataset.rate) === rate));
+  });
+  speedStatus.textContent = rate === DEFAULT_PLAYBACK_RATE ? 'Normal speed' : `Playing at ${formatRate(rate)}`;
 }
 
 function resetSeekState(): void {
@@ -425,9 +465,13 @@ document.addEventListener('keydown', (event) => {
   }
   if (
     (event.code === 'ArrowLeft' || event.code === 'ArrowRight') &&
+    !event.altKey &&
+    !event.metaKey &&
     !(target instanceof HTMLInputElement) &&
     !(target instanceof HTMLTextAreaElement) &&
-    !(target instanceof HTMLSelectElement)
+    !(target instanceof HTMLSelectElement) &&
+    !(target instanceof HTMLButtonElement) &&
+    !(target instanceof HTMLAnchorElement)
   ) {
     event.preventDefault();
     requestSeekBy(event.code === 'ArrowLeft' ? -SEEK_STEP_S : SEEK_STEP_S);
@@ -435,6 +479,9 @@ document.addEventListener('keydown', (event) => {
 });
 document.querySelectorAll<HTMLButtonElement>('[data-minutes]').forEach((button) => {
   button.addEventListener('click', () => setSleepTimer(Number(button.dataset.minutes)));
+});
+document.querySelectorAll<HTMLButtonElement>('[data-rate]').forEach((button) => {
+  button.addEventListener('click', () => setPlaybackRate(normaliseRate(button.dataset.rate)));
 });
 
 requiredElement<HTMLButtonElement>('#open-submission').addEventListener('click', () => {
@@ -484,6 +531,7 @@ async function initialise(): Promise<void> {
     const savedIndex = queue.findIndex((clip) => clip.id === savedClipId);
     currentIndex = savedIndex >= 0 ? savedIndex : 0;
     feedCount.textContent = `${queue.length} short pieces ready`;
+    setPlaybackRate(intendedRate);
     playButton.disabled = false;
     nextButton.disabled = false;
     likeButton.disabled = false;

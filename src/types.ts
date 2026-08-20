@@ -6,6 +6,8 @@ export interface Clip {
   licence: string;
   attribution: string;
   source: string;
+  startOffsetS?: number;
+  endOffsetS?: number;
 }
 
 export interface ClipsResponse {
@@ -27,5 +29,17 @@ export interface SubmissionInput {
 
 export interface SubmissionResponse {
   id: string;
+  status: 'pending';
+}
+
+export interface FeedImportInput {
+  feedUrl: string;
+  submitterEmail: string;
+}
+
+export interface FeedImportResponse {
+  imported: number;
+  skipped: number;
+  episodes: number;
   status: 'pending';
 }

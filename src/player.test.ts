@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { Clip } from './types';
 import {
+  clipStartOffset,
   createQueue,
   formatDuration,
+  isPastClipEnd,
   isSleepDue,
   nextClipIndex,
   previousClipIndex,
@@ -36,6 +38,29 @@ describe('listening queue', () => {
     expect(nextClipIndex(7, 8)).toBe(0);
     expect(previousClipIndex(0, 8)).toBe(7);
     expect(nextClipIndex(0, 0)).toBe(0);
+  });
+});
+
+describe('imported podcast slices', () => {
+  const whole = clips[0] as Clip;
+  const slice: Clip = { ...whole, startOffsetS: 44, endOffsetS: 88 };
+
+  it('starts a slice at its offset and a whole clip at the beginning', () => {
+    expect(clipStartOffset(slice)).toBe(44);
+    expect(clipStartOffset(whole)).toBe(0);
+    expect(clipStartOffset({ ...whole, startOffsetS: Number.NaN })).toBe(0);
+  });
+
+  it('ends a slice at its end offset', () => {
+    expect(isPastClipEnd(87.9, slice)).toBe(false);
+    expect(isPastClipEnd(88, slice)).toBe(true);
+    expect(isPastClipEnd(120, slice)).toBe(true);
+  });
+
+  it('lets a clip without offsets play to its own end', () => {
+    expect(isPastClipEnd(5_000, whole)).toBe(false);
+    expect(isPastClipEnd(5_000, { ...whole, endOffsetS: 0 })).toBe(false);
+    expect(isPastClipEnd(5_000, { ...slice, endOffsetS: 44 })).toBe(false);
   });
 });
 

@@ -469,8 +469,20 @@ dialog::backdrop {
   background: rgba(23, 23, 22, 0.78);
 }
 
-#submission-form {
+#submission-form,
+#import-form {
   padding: clamp(1.4rem, 4vw, 3rem);
+}
+
+#import-form {
+  border-top: 2px solid var(--ink);
+  padding-top: clamp(1.2rem, 3vw, 2rem);
+}
+
+#import-form h3 {
+  margin: 0.3rem 0 1rem;
+  font-size: clamp(1.5rem, 3.5vw, 2.2rem);
+  font-weight: 500;
 }
 
 .dialog-heading {
@@ -500,7 +512,8 @@ dialog::backdrop {
   background: #e9ddc8;
 }
 
-#submission-form label {
+#submission-form label,
+#import-form label {
   display: grid;
   gap: 0.4rem;
   margin-top: 1rem;
@@ -511,7 +524,8 @@ dialog::backdrop {
 }
 
 #submission-form input,
-#submission-form textarea {
+#submission-form textarea,
+#import-form input {
   width: 100%;
   border: 1px solid var(--ink);
   background: #fffaf1;
@@ -526,7 +540,8 @@ dialog::backdrop {
   margin-top: 1.25rem;
 }
 
-#submission-result {
+#submission-result,
+#import-result {
   display: grid;
   gap: 0.35rem;
   min-height: 1.5rem;

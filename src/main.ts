@@ -1,9 +1,11 @@
 import './style.css';
 
-import { getClips, recordPlay, submitClip } from './api';
+import { getClips, importFeed, recordPlay, submitClip } from './api';
 import {
+  clipStartOffset,
   createQueue,
   formatDuration,
+  isPastClipEnd,
   isSleepDue,
   nextClipIndex,
   previousClipIndex,
@@ -42,7 +44,7 @@ import {
   writeIdList,
   writeValue,
 } from './storage';
-import type { Clip, SubmissionInput } from './types';
+import type { Clip, FeedImportInput, SubmissionInput } from './types';
 
 const LIKES_STORAGE_KEY = 'yapfeed.likes';
 const SKIPS_STORAGE_KEY = 'yapfeed.skips';
@@ -183,6 +185,15 @@ app.innerHTML = `
       <button class="submit-button" type="submit">Send for review</button>
       <p id="submission-result" role="status"></p>
     </form>
+    <form id="import-form">
+      <p class="eyebrow">PODCAST FEED</p>
+      <h3 id="import-title">Or import a feed</h3>
+      <p class="review-note">Episodes are cut into parts of a minute or less. Every part joins the same pending queue.</p>
+      <label>Podcast feed address<input name="feedUrl" type="url" inputmode="url" placeholder="https://…/rss" pattern="https://.*" maxlength="2048" required /></label>
+      <label>Email for the import<input name="submitterEmail" type="email" autocomplete="email" maxlength="254" required /></label>
+      <button class="submit-button" id="import-submit" type="submit">Import and slice</button>
+      <p id="import-result" role="status"></p>
+    </form>
   </dialog>
 `;
 
@@ -204,6 +215,8 @@ const offlineStatus = requiredElement<HTMLElement>('#offline-status');
 const submissionDialog = requiredElement<HTMLDialogElement>('#submission-dialog');
 const submissionForm = requiredElement<HTMLFormElement>('#submission-form');
 const submissionResult = requiredElement<HTMLElement>('#submission-result');
+const importForm = requiredElement<HTMLFormElement>('#import-form');
+const importResult = requiredElement<HTMLElement>('#import-result');
 
 let queue: Clip[] = [];
 let currentIndex = 0;
@@ -237,6 +250,12 @@ function updateMediaMetadata(clip: Clip): void {
     album: 'Yapfeed · short public-domain audio',
   });
   navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+}
+
+function seekToClipStart(clip: Clip): void {
+  const start = clipStartOffset(clip);
+  if (start === 0 || audio.currentTime >= start) return;
+  audio.currentTime = start;
 }
 
 function setAudioSource(clip: Clip, blob: Blob | null): void {
@@ -500,12 +519,20 @@ audio.addEventListener('seeked', () => {
   applyIntendedRate();
   flushPendingSeek();
 });
-audio.addEventListener('loadedmetadata', () => applyIntendedRate());
+audio.addEventListener('loadedmetadata', () => {
+  applyIntendedRate();
+  const clip = currentClip();
+  if (clip !== undefined) seekToClipStart(clip);
+});
 audio.addEventListener('canplay', () => applyIntendedRate());
 audio.addEventListener('ratechange', () => applyIntendedRate());
 // Media events keep arriving while a suspended tab plays audio, so they double
 // as a wake-up for the sleep deadline.
-audio.addEventListener('timeupdate', () => checkSleepDeadline());
+audio.addEventListener('timeupdate', () => {
+  checkSleepDeadline();
+  const clip = currentClip();
+  if (clip !== undefined && isPastClipEnd(audio.currentTime, clip)) moveNext(true);
+});
 document.addEventListener('visibilitychange', () => {
   checkSleepDeadline();
   if (document.visibilityState === 'visible') armSleepCheck();
@@ -557,6 +584,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-rate]').forEach((button) => 
 
 requiredElement<HTMLButtonElement>('#open-submission').addEventListener('click', () => {
   submissionResult.textContent = '';
+  importResult.textContent = '';
   submissionDialog.showModal();
 });
 requiredElement<HTMLButtonElement>('#close-submission').addEventListener('click', () => {
@@ -584,6 +612,32 @@ submissionForm.addEventListener('submit', (event) => {
     })
     .finally(() => {
       submitButton.disabled = false;
+    });
+});
+
+importForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const form = new FormData(importForm);
+  const input: FeedImportInput = {
+    feedUrl: String(form.get('feedUrl') ?? ''),
+    submitterEmail: String(form.get('submitterEmail') ?? ''),
+  };
+  const importButton = requiredElement<HTMLButtonElement>('#import-submit');
+  importButton.disabled = true;
+  importResult.textContent = 'Reading the feed and cutting it into parts…';
+  void importFeed(input)
+    .then((response) => {
+      importForm.reset();
+      importResult.textContent =
+        response.imported === 0
+          ? `Nothing new to queue; all ${response.skipped} parts are already waiting for review.`
+          : `Queued ${response.imported} parts from ${response.episodes} episodes for review.`;
+    })
+    .catch((error: unknown) => {
+      importResult.textContent = error instanceof Error ? error.message : 'That feed could not be imported.';
+    })
+    .finally(() => {
+      importButton.disabled = false;
     });
 });
 

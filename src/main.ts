@@ -4,9 +4,11 @@ import { getClips, recordPlay, submitClip } from './api';
 import {
   createQueue,
   formatDuration,
+  isSleepDue,
   nextClipIndex,
   previousClipIndex,
   registerMediaSessionHandlers,
+  sleepCheckDelay,
   sleepDeadline,
 } from './player';
 import { getOrCreateSessionId, hashSessionId } from './session';
@@ -181,6 +183,7 @@ let currentIndex = 0;
 let sessionHash = '';
 let isPlaying = false;
 let sleepTimer: ReturnType<typeof setTimeout> | undefined;
+let sleepDeadlineMs: number | null = null;
 const likedIds = readStoredIds(LIKES_STORAGE_KEY);
 const skippedIds = readStoredIds(SKIPS_STORAGE_KEY);
 
@@ -283,22 +286,48 @@ function movePrevious(): void {
   moveTo(previousClipIndex(currentIndex, queue.length), false);
 }
 
-function setSleepTimer(minutes: number): void {
-  if (sleepTimer !== undefined) clearTimeout(sleepTimer);
-  const deadline = sleepDeadline(minutes);
+function markSleepChoice(minutes: number): void {
   document.querySelectorAll<HTMLButtonElement>('[data-minutes]').forEach((button) => {
     button.setAttribute('aria-pressed', String(Number(button.dataset.minutes) === minutes));
   });
-  if (deadline === null) {
+}
+
+function clearSleepCheck(): void {
+  if (sleepTimer !== undefined) clearTimeout(sleepTimer);
+  sleepTimer = undefined;
+}
+
+// Background tabs suspend timers on iOS, so every wake-up compares the wall
+// clock against the deadline instead of trusting a single long timeout.
+function armSleepCheck(): void {
+  clearSleepCheck();
+  if (sleepDeadlineMs === null) return;
+  sleepTimer = setTimeout(() => {
     sleepTimer = undefined;
+    checkSleepDeadline();
+    armSleepCheck();
+  }, sleepCheckDelay(sleepDeadlineMs));
+}
+
+function checkSleepDeadline(): void {
+  if (!isSleepDue(sleepDeadlineMs)) return;
+  sleepDeadlineMs = null;
+  clearSleepCheck();
+  markSleepChoice(0);
+  pausePlayback('Sleep timer finished. Your place is saved.');
+  sleepStatus.textContent = 'Timer finished';
+}
+
+function setSleepTimer(minutes: number): void {
+  sleepDeadlineMs = sleepDeadline(minutes);
+  markSleepChoice(minutes);
+  if (sleepDeadlineMs === null) {
+    clearSleepCheck();
     sleepStatus.textContent = 'No timer set';
     return;
   }
   sleepStatus.textContent = `Stops in ${minutes} minutes`;
-  sleepTimer = setTimeout(() => {
-    pausePlayback('Sleep timer finished. Your place is saved.');
-    sleepStatus.textContent = 'Timer finished';
-  }, Math.max(0, deadline - Date.now()));
+  armSleepCheck();
 }
 
 playButton.addEventListener('click', () => void togglePlayback());
@@ -312,6 +341,17 @@ likeButton.addEventListener('click', () => {
   updatePlayer();
 });
 audio.addEventListener('ended', () => moveNext(true));
+// Media events keep arriving while a suspended tab plays audio, so they double
+// as a wake-up for the sleep deadline.
+audio.addEventListener('timeupdate', () => checkSleepDeadline());
+document.addEventListener('visibilitychange', () => {
+  checkSleepDeadline();
+  if (document.visibilityState === 'visible') armSleepCheck();
+});
+window.addEventListener('pageshow', () => {
+  checkSleepDeadline();
+  armSleepCheck();
+});
 audio.addEventListener('play', () => updatePlaybackState(true));
 audio.addEventListener('pause', () => updatePlaybackState(false));
 audio.addEventListener('error', () => {

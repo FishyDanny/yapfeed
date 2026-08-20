@@ -11,6 +11,15 @@ import {
   sleepCheckDelay,
   sleepDeadline,
 } from './player';
+import {
+  canCommitSeek,
+  clampSeekTarget,
+  MINIMUM_SEEK_GAP_MS,
+  nextSeekTarget,
+  rateCorrection,
+  SEEK_STEP_S,
+  type SeekGate,
+} from './seek';
 import { getOrCreateSessionId, hashSessionId } from './session';
 import type { Clip, SubmissionInput } from './types';
 
@@ -184,6 +193,10 @@ let sessionHash = '';
 let isPlaying = false;
 let sleepTimer: ReturnType<typeof setTimeout> | undefined;
 let sleepDeadlineMs: number | null = null;
+let intendedRate = 1;
+let pendingSeekTargetS: number | null = null;
+let seekFlushTimer: ReturnType<typeof setTimeout> | undefined;
+const seekGate: SeekGate = { seeking: false, lastCommitMs: null };
 const likedIds = readStoredIds(LIKES_STORAGE_KEY);
 const skippedIds = readStoredIds(SKIPS_STORAGE_KEY);
 
@@ -211,8 +224,10 @@ function updatePlayer(): void {
   source.href = clip.source;
   queuePosition.textContent = `${(currentIndex + 1).toString().padStart(2, '0')} / ${queue.length.toString().padStart(2, '0')}`;
   if (audio.src !== clip.sourceUrl) {
+    resetSeekState();
     audio.src = clip.sourceUrl;
     audio.load();
+    applyIntendedRate();
   }
   const liked = likedIds.has(clip.id);
   likeButton.setAttribute('aria-pressed', String(liked));
@@ -256,6 +271,57 @@ async function togglePlayback(forcePlay = false): Promise<void> {
     return;
   }
   await startPlayback();
+}
+
+// Some browsers drop the element back to an arbitrary rate after a seek that
+// lands inside an unbuffered range, which is heard as distortion.
+function applyIntendedRate(): void {
+  const correction = rateCorrection(audio.playbackRate, intendedRate);
+  if (correction !== null) audio.playbackRate = correction;
+}
+
+function resetSeekState(): void {
+  if (seekFlushTimer !== undefined) clearTimeout(seekFlushTimer);
+  seekFlushTimer = undefined;
+  pendingSeekTargetS = null;
+  seekGate.seeking = false;
+  seekGate.lastCommitMs = null;
+}
+
+function scheduleSeekFlush(): void {
+  if (seekFlushTimer !== undefined) return;
+  seekFlushTimer = setTimeout(() => {
+    seekFlushTimer = undefined;
+    flushPendingSeek();
+  }, MINIMUM_SEEK_GAP_MS);
+}
+
+function flushPendingSeek(): void {
+  const target = pendingSeekTargetS;
+  if (target === null) return;
+  if (!canCommitSeek(seekGate, Date.now())) {
+    scheduleSeekFlush();
+    return;
+  }
+  pendingSeekTargetS = null;
+  seekGate.seeking = true;
+  seekGate.lastCommitMs = Date.now();
+  audio.currentTime = target;
+}
+
+function requestSeekTo(positionS: number): void {
+  if (currentClip() === undefined) return;
+  pendingSeekTargetS = clampSeekTarget(positionS, audio.duration);
+  flushPendingSeek();
+}
+
+function requestSeekBy(offsetS: number): void {
+  const base = pendingSeekTargetS ?? audio.currentTime;
+  requestSeekTo(nextSeekTarget(base, offsetS, audio.duration));
+  playerStatus.textContent =
+    offsetS < 0
+      ? `Moved back ${Math.abs(Math.round(offsetS))} seconds.`
+      : `Moved on ${Math.round(offsetS)} seconds.`;
 }
 
 function sendPlayOutcome(clip: Clip, completed: boolean): void {
@@ -341,6 +407,17 @@ likeButton.addEventListener('click', () => {
   updatePlayer();
 });
 audio.addEventListener('ended', () => moveNext(true));
+audio.addEventListener('seeking', () => {
+  seekGate.seeking = true;
+});
+audio.addEventListener('seeked', () => {
+  seekGate.seeking = false;
+  applyIntendedRate();
+  flushPendingSeek();
+});
+audio.addEventListener('loadedmetadata', () => applyIntendedRate());
+audio.addEventListener('canplay', () => applyIntendedRate());
+audio.addEventListener('ratechange', () => applyIntendedRate());
 // Media events keep arriving while a suspended tab plays audio, so they double
 // as a wake-up for the sleep deadline.
 audio.addEventListener('timeupdate', () => checkSleepDeadline());
@@ -369,6 +446,16 @@ document.addEventListener('keydown', (event) => {
   ) {
     event.preventDefault();
     moveNext(false);
+    return;
+  }
+  if (
+    (event.code === 'ArrowLeft' || event.code === 'ArrowRight') &&
+    !(target instanceof HTMLInputElement) &&
+    !(target instanceof HTMLTextAreaElement) &&
+    !(target instanceof HTMLSelectElement)
+  ) {
+    event.preventDefault();
+    requestSeekBy(event.code === 'ArrowLeft' ? -SEEK_STEP_S : SEEK_STEP_S);
   }
 });
 document.querySelectorAll<HTMLButtonElement>('[data-minutes]').forEach((button) => {
@@ -431,6 +518,8 @@ async function initialise(): Promise<void> {
       pause: () => pausePlayback(),
       next: () => moveNext(false),
       previous: movePrevious,
+      seekBy: requestSeekBy,
+      seekTo: requestSeekTo,
     });
   } catch (error: unknown) {
     feedCount.textContent = 'The feed could not be loaded';

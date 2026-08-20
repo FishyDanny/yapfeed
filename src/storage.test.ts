@@ -9,6 +9,7 @@ import {
   readIdList,
   toggleId,
   writeIdList,
+  readValue,
   writeValue,
 } from './storage';
 
@@ -71,6 +72,9 @@ describe('quota-safe writes', () => {
   it('round-trips a list through storage', () => {
     const storage = new QuotaStorage();
 
+    expect(writeValue(storage, 'yapfeed.rate', '1.5')).toBe(true);
+    expect(readValue(storage, 'yapfeed.rate')).toBe('1.5');
+
     expect(writeIdList(storage, 'yapfeed.skips', ['a', 'b'])).toEqual(['a', 'b']);
     expect(readIdList(storage, 'yapfeed.skips')).toEqual(['a', 'b']);
   });
@@ -108,5 +112,6 @@ describe('quota-safe writes', () => {
 
     expect(readIdList(blocked, 'yapfeed.likes')).toEqual([]);
     expect(writeIdList(blocked, 'yapfeed.likes', ['a'])).toEqual([]);
+    expect(readValue(blocked, 'yapfeed.rate')).toBeNull();
   });
 });

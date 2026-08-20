@@ -299,26 +299,43 @@ button:disabled {
   margin-top: 2rem;
 }
 
-.sleep-panel {
+.panel-stack {
   border-top: 2px solid var(--ink);
+  display: grid;
+  grid-template-rows: auto auto;
+}
+
+.sleep-panel,
+.speed-panel {
   padding: 1.5rem;
+}
+
+.sleep-panel {
   background: var(--cyan);
 }
 
-.sleep-panel p {
+.speed-panel {
+  border-top: 2px solid var(--ink);
+  background: var(--paper);
+}
+
+.sleep-panel p,
+.speed-panel p {
   margin: 0 0 0.8rem;
   font-size: 0.7rem;
   font-weight: 900;
   letter-spacing: 0.16em;
 }
 
-.sleep-options {
+.sleep-options,
+.speed-options {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   border: 1px solid var(--ink);
 }
 
-.sleep-options button {
+.sleep-options button,
+.speed-options button {
   min-height: 44px;
   border: 0;
   border-right: 1px solid var(--ink);
@@ -327,16 +344,19 @@ button:disabled {
   font-weight: 850;
 }
 
-.sleep-options button:last-child {
+.sleep-options button:last-child,
+.speed-options button:last-child {
   border-right: 0;
 }
 
-.sleep-options button[aria-pressed="true"] {
+.sleep-options button[aria-pressed="true"],
+.speed-options button[aria-pressed="true"] {
   background: var(--ink);
   color: var(--paper);
 }
 
-#sleep-status {
+#sleep-status,
+#speed-status {
   display: block;
   margin-top: 0.7rem;
   font-size: 0.78rem;
@@ -519,12 +539,10 @@ dialog::backdrop {
     min-height: 230px;
   }
 
-  .sleep-panel {
+  .panel-stack {
     border-top: 0;
     border-left: 2px solid var(--ink);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+    align-content: center;
   }
 
   .details-grid {
@@ -613,7 +631,7 @@ dialog::backdrop {
     font-size: 7rem;
   }
 
-  .sleep-panel {
+  .panel-stack {
     border-left: 0;
     border-top: 2px solid var(--ink);
   }

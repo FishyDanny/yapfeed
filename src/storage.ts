@@ -79,6 +79,14 @@ export function writeIdList(
   }
 }
 
+export function readValue(storage: LocalStoragePort, key: string): string | null {
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 export function writeValue(storage: LocalStoragePort, key: string, value: string): boolean {
   try {
     storage.setItem(key, value);

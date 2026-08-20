@@ -108,6 +108,33 @@ test('starts once, advances without another look and keeps a local like', async 
   expect(requests.some((request) => request.url.endsWith('/api/plays'))).toBe(true);
 });
 
+test('keeps a chosen listening speed across a reload', async ({ page }) => {
+  await page.route('**/api/**', async (route) => {
+    if (usesLiveApi) {
+      await route.continue();
+      return;
+    }
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ clips }) });
+      return;
+    }
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ recorded: true }) });
+  });
+
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Start listening' })).toBeEnabled();
+
+  const faster = page.getByRole('button', { name: '1.5x' });
+  await faster.click();
+  await expect(faster).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Playing at 1.5x')).toBeVisible();
+  expect(await page.locator('audio').evaluate((audio) => audio.playbackRate)).toBe(1.5);
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: '1.5x' })).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.locator('audio').evaluate((audio) => audio.playbackRate)).toBe(1.5);
+});
+
 test('queues a one-minute contribution for human review', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const request = route.request();

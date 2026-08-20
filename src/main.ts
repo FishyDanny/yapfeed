@@ -21,6 +21,7 @@ import {
   type SeekGate,
 } from './seek';
 import { getOrCreateSessionId, hashSessionId } from './session';
+import { readIdList, toggleId, appendId, writeIdList, writeValue } from './storage';
 import type { Clip, SubmissionInput } from './types';
 
 const LIKES_STORAGE_KEY = 'yapfeed.likes';
@@ -31,26 +32,6 @@ function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (element === null) throw new Error(`Yapfeed is missing ${selector}.`);
   return element;
-}
-
-function readStoredIds(key: string): Set<string> {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
-    if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
-      return new Set(value);
-    }
-  } catch {
-    return new Set();
-  }
-  return new Set();
-}
-
-function saveStoredIds(key: string, ids: Set<string>): void {
-  try {
-    localStorage.setItem(key, JSON.stringify([...ids]));
-  } catch {
-    // Playback remains useful when a browser blocks local storage.
-  }
 }
 
 const app = requiredElement<HTMLElement>('#app');
@@ -197,8 +178,8 @@ let intendedRate = 1;
 let pendingSeekTargetS: number | null = null;
 let seekFlushTimer: ReturnType<typeof setTimeout> | undefined;
 const seekGate: SeekGate = { seeking: false, lastCommitMs: null };
-const likedIds = readStoredIds(LIKES_STORAGE_KEY);
-const skippedIds = readStoredIds(SKIPS_STORAGE_KEY);
+let likedIds = readIdList(localStorage, LIKES_STORAGE_KEY);
+let skippedIds = readIdList(localStorage, SKIPS_STORAGE_KEY);
 
 function currentClip(): Clip | undefined {
   return queue[currentIndex];
@@ -229,14 +210,11 @@ function updatePlayer(): void {
     audio.load();
     applyIntendedRate();
   }
-  const liked = likedIds.has(clip.id);
+  const liked = likedIds.includes(clip.id);
   likeButton.setAttribute('aria-pressed', String(liked));
   likeButton.textContent = liked ? 'Unlike this piece' : 'Like this piece';
-  try {
-    localStorage.setItem(CURRENT_CLIP_STORAGE_KEY, clip.id);
-  } catch {
-    // Queue position may reset when storage is unavailable.
-  }
+  // Queue position may reset when storage is unavailable.
+  writeValue(localStorage, CURRENT_CLIP_STORAGE_KEY, clip.id);
   updateMediaMetadata(clip);
 }
 
@@ -342,8 +320,7 @@ function moveTo(index: number, completed: boolean): void {
 function moveNext(completed = false): void {
   const outgoing = currentClip();
   if (!completed && outgoing !== undefined) {
-    skippedIds.add(outgoing.id);
-    saveStoredIds(SKIPS_STORAGE_KEY, skippedIds);
+    skippedIds = writeIdList(localStorage, SKIPS_STORAGE_KEY, appendId(skippedIds, outgoing.id));
   }
   moveTo(nextClipIndex(currentIndex, queue.length), completed);
 }
@@ -401,9 +378,7 @@ nextButton.addEventListener('click', () => moveNext(false));
 likeButton.addEventListener('click', () => {
   const clip = currentClip();
   if (clip === undefined) return;
-  if (likedIds.has(clip.id)) likedIds.delete(clip.id);
-  else likedIds.add(clip.id);
-  saveStoredIds(LIKES_STORAGE_KEY, likedIds);
+  likedIds = writeIdList(localStorage, LIKES_STORAGE_KEY, toggleId(likedIds, clip.id));
   updatePlayer();
 });
 audio.addEventListener('ended', () => moveNext(true));

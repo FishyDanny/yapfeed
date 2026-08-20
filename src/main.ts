@@ -21,6 +21,12 @@ import {
   type SeekGate,
 } from './seek';
 import {
+  createIndexedDbAudioCache,
+  describeOfflineCache,
+  selectPrefetchClips,
+  syncOfflineCache,
+} from './offline';
+import {
   DEFAULT_PLAYBACK_RATE,
   formatRate,
   normaliseRate,
@@ -42,6 +48,7 @@ const LIKES_STORAGE_KEY = 'yapfeed.likes';
 const SKIPS_STORAGE_KEY = 'yapfeed.skips';
 const CURRENT_CLIP_STORAGE_KEY = 'yapfeed.current.clip';
 const RATE_STORAGE_KEY = 'yapfeed.rate';
+const PREFETCH_DELAY_MS = 2_000;
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -86,6 +93,7 @@ app.innerHTML = `
 
       <audio id="audio" preload="metadata"></audio>
       <p class="player-status" id="player-status" role="status">Choose play once; auto-advance is already on.</p>
+      <p class="offline-note" id="offline-status" role="status"></p>
 
       <div class="controls" aria-label="Playback controls">
         <button class="play-button" id="play" type="button" disabled>Start listening</button>
@@ -150,7 +158,7 @@ app.innerHTML = `
 
   <section class="privacy-note">
     <h2>What leaves this browser</h2>
-    <p>Audio streams from Internet Archive. Yapfeed records an anonymous session hash with completed or skipped clips so completion rate and clips per session can be measured. Likes, skip history and queue position stay in local storage. Submission details enter a private pending-review queue; email addresses are never shown in the feed.</p>
+    <p>Audio streams from Internet Archive. Yapfeed records an anonymous session hash with completed or skipped clips so completion rate and clips per session can be measured. Likes, skip history and queue position stay in local storage, and the next few clips are copied into this browser so listening survives a dropped connection. Submission details enter a private pending-review queue; email addresses are never shown in the feed.</p>
   </section>
 
   <footer>
@@ -192,6 +200,7 @@ const queuePosition = requiredElement<HTMLElement>('#queue-position');
 const playerStatus = requiredElement<HTMLElement>('#player-status');
 const sleepStatus = requiredElement<HTMLElement>('#sleep-status');
 const speedStatus = requiredElement<HTMLElement>('#speed-status');
+const offlineStatus = requiredElement<HTMLElement>('#offline-status');
 const submissionDialog = requiredElement<HTMLDialogElement>('#submission-dialog');
 const submissionForm = requiredElement<HTMLFormElement>('#submission-form');
 const submissionResult = requiredElement<HTMLElement>('#submission-result');
@@ -206,6 +215,13 @@ let intendedRate: PlaybackRate = normaliseRate(readValue(localStorage, RATE_STOR
 let pendingSeekTargetS: number | null = null;
 let seekFlushTimer: ReturnType<typeof setTimeout> | undefined;
 const seekGate: SeekGate = { seeking: false, lastCommitMs: null };
+const audioCache = createIndexedDbAudioCache(
+  typeof indexedDB === 'undefined' ? undefined : indexedDB,
+);
+let loadedClipId: string | null = null;
+let objectUrl: string | null = null;
+let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+let prefetchRunning = false;
 let likedIds = readIdList(localStorage, LIKES_STORAGE_KEY);
 let skippedIds = readIdList(localStorage, SKIPS_STORAGE_KEY);
 
@@ -223,6 +239,65 @@ function updateMediaMetadata(clip: Clip): void {
   navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 }
 
+function setAudioSource(clip: Clip, blob: Blob | null): void {
+  const wasPlaying = isPlaying;
+  const previous = objectUrl;
+  objectUrl = blob === null ? null : URL.createObjectURL(blob);
+  audio.src = objectUrl ?? clip.sourceUrl;
+  audio.load();
+  applyIntendedRate();
+  if (previous !== null) URL.revokeObjectURL(previous);
+  if (wasPlaying) void startPlayback();
+}
+
+// The loaded clip is tracked by id because a cached clip plays from a blob URL
+// that will never match its source URL.
+function loadClipSource(clip: Clip): void {
+  if (loadedClipId === clip.id) return;
+  loadedClipId = clip.id;
+  resetSeekState();
+  if (audioCache === null) {
+    setAudioSource(clip, null);
+    return;
+  }
+  void audioCache
+    .read(clip.id)
+    .catch(() => undefined)
+    .then((blob) => {
+      if (loadedClipId !== clip.id) return;
+      setAudioSource(clip, blob ?? null);
+    });
+}
+
+async function downloadClip(clip: Clip): Promise<Blob | null> {
+  const response = await fetch(clip.sourceUrl, { credentials: 'omit' });
+  if (!response.ok) return null;
+  return await response.blob();
+}
+
+async function runPrefetch(): Promise<void> {
+  if (audioCache === null || prefetchRunning || navigator.onLine === false) return;
+  prefetchRunning = true;
+  try {
+    await syncOfflineCache(audioCache, selectPrefetchClips(queue, currentIndex), downloadClip);
+    const saved = await audioCache.keys();
+    offlineStatus.textContent = describeOfflineCache(saved.length);
+  } catch {
+    // Offline copies are a convenience; streaming carries on without them.
+  } finally {
+    prefetchRunning = false;
+  }
+}
+
+function schedulePrefetch(): void {
+  if (audioCache === null) return;
+  if (prefetchTimer !== undefined) clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(() => {
+    prefetchTimer = undefined;
+    void runPrefetch();
+  }, PREFETCH_DELAY_MS);
+}
+
 function updatePlayer(): void {
   const clip = currentClip();
   if (clip === undefined) return;
@@ -232,12 +307,7 @@ function updatePlayer(): void {
   licence.textContent = clip.licence.toUpperCase();
   source.href = clip.source;
   queuePosition.textContent = `${(currentIndex + 1).toString().padStart(2, '0')} / ${queue.length.toString().padStart(2, '0')}`;
-  if (audio.src !== clip.sourceUrl) {
-    resetSeekState();
-    audio.src = clip.sourceUrl;
-    audio.load();
-    applyIntendedRate();
-  }
+  loadClipSource(clip);
   const liked = likedIds.includes(clip.id);
   likeButton.setAttribute('aria-pressed', String(liked));
   likeButton.textContent = liked ? 'Unlike this piece' : 'Like this piece';
@@ -354,7 +424,7 @@ function moveTo(index: number, completed: boolean): void {
   if (outgoing !== undefined) sendPlayOutcome(outgoing, completed);
   currentIndex = index;
   updatePlayer();
-  if (isPlaying) void startPlayback();
+  schedulePrefetch();
 }
 
 function moveNext(completed = false): void {
@@ -444,6 +514,7 @@ window.addEventListener('pageshow', () => {
   checkSleepDeadline();
   armSleepCheck();
 });
+window.addEventListener('online', () => schedulePrefetch());
 audio.addEventListener('play', () => updatePlaybackState(true));
 audio.addEventListener('pause', () => updatePlaybackState(false));
 audio.addEventListener('error', () => {
@@ -536,6 +607,7 @@ async function initialise(): Promise<void> {
     nextButton.disabled = false;
     likeButton.disabled = false;
     updatePlayer();
+    schedulePrefetch();
     registerMediaSessionHandlers(navigator.mediaSession, {
       play: () => void startPlayback(),
       pause: () => pausePlayback(),

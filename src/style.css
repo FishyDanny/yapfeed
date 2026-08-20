@@ -221,6 +221,16 @@ h1 {
   font-size: 0.85rem;
 }
 
+.offline-note {
+  margin: 0 0 0.8rem;
+  color: #5a5144;
+  font-size: 0.78rem;
+}
+
+.offline-note:empty {
+  display: none;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;

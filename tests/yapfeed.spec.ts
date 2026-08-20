@@ -135,6 +135,47 @@ test('keeps a chosen listening speed across a reload', async ({ page }) => {
   expect(await page.locator('audio').evaluate((audio) => audio.playbackRate)).toBe(1.5);
 });
 
+test('saves the pieces that play next for offline listening', async ({ page }) => {
+  test.skip(usesLiveApi, 'Offline caching is verified against mocked audio downloads.');
+  await page.route('**/api/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ clips }) });
+  });
+  await page.route('https://archive.org/**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'audio/mpeg',
+      body: Buffer.from('a short recording stands in for the audio bytes'),
+    });
+  });
+
+  await page.goto('/');
+  await expect(page.getByText('The next 5 pieces are saved in this browser.')).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const savedIds = await page.evaluate(
+    () =>
+      new Promise<string[]>((resolve, reject) => {
+        const request = indexedDB.open('yapfeed', 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const keys = request.result
+            .transaction('clip-audio', 'readonly')
+            .objectStore('clip-audio')
+            .getAllKeys();
+          keys.onsuccess = () => resolve(keys.result.map(String));
+          keys.onerror = () => reject(keys.error);
+        };
+      }),
+  );
+  expect(savedIds).toHaveLength(5);
+
+  await page.getByRole('button', { name: 'Next piece' }).click();
+  await expect
+    .poll(async () => page.locator('audio').evaluate((audio) => audio.currentSrc.slice(0, 5)))
+    .toBe('blob:');
+});
+
 test('queues a one-minute contribution for human review', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const request = route.request();

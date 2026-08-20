@@ -4,9 +4,11 @@ import type { Clip } from './types';
 import {
   createQueue,
   formatDuration,
+  isSleepDue,
   nextClipIndex,
   previousClipIndex,
   registerMediaSessionHandlers,
+  sleepCheckDelay,
   sleepDeadline,
 } from './player';
 
@@ -43,6 +45,21 @@ describe('eyes-closed controls', () => {
     expect(formatDuration(3600)).toBe('1:00:00');
     expect(sleepDeadline(20, 1_000)).toBe(1_201_000);
     expect(sleepDeadline(0, 1_000)).toBeNull();
+  });
+
+  it('reports a sleep deadline as due from the wall clock, not from a timer', () => {
+    const deadline = sleepDeadline(20, 1_000);
+
+    expect(isSleepDue(deadline, 1_200_999)).toBe(false);
+    expect(isSleepDue(deadline, 1_201_000)).toBe(true);
+    expect(isSleepDue(deadline, 9_000_000)).toBe(true);
+    expect(isSleepDue(null, 9_000_000)).toBe(false);
+  });
+
+  it('re-arms the sleep check often enough to survive a suspended background tab', () => {
+    expect(sleepCheckDelay(1_201_000, 1_000, 15_000)).toBe(15_000);
+    expect(sleepCheckDelay(1_201_000, 1_195_000, 15_000)).toBe(6_000);
+    expect(sleepCheckDelay(1_201_000, 1_800_000, 15_000)).toBe(0);
   });
 
   it('registers play, pause, next and previous lock-screen actions', () => {

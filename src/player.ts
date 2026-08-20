@@ -71,6 +71,18 @@ export function sleepDeadline(minutes: number, now = Date.now()): number | null 
   return now + minutes * 60_000;
 }
 
+export function isSleepDue(deadline: number | null, now = Date.now()): boolean {
+  return deadline !== null && now >= deadline;
+}
+
+export function sleepCheckDelay(
+  deadline: number,
+  now = Date.now(),
+  maximumDelay = 15_000,
+): number {
+  return Math.max(0, Math.min(maximumDelay, deadline - now));
+}
+
 export function registerMediaSessionHandlers(
   session: MediaSessionPort | undefined,
   controls: PlayerControls,

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://s72-yapfeed.pages.dev/sitemap.xml

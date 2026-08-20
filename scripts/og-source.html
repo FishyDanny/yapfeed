@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      * { box-sizing: border-box; }
+      body { width: 1200px; height: 630px; margin: 0; overflow: hidden; background: #f2e8d5; color: #171716; font-family: Arial, sans-serif; }
+      header { height: 82px; padding: 0 58px; border-bottom: 3px solid #171716; display: flex; align-items: center; justify-content: space-between; font-size: 28px; font-weight: 900; letter-spacing: -2px; }
+      header strong { color: #e3513d; }
+      header span:last-child { color: #8a321f; font-size: 14px; letter-spacing: 3px; }
+      main { height: 548px; display: grid; grid-template-columns: 130px 1fr 310px; }
+      .signal { padding: 38px 24px; background: #171716; }
+      .signal i { display: block; height: 5px; margin: 21px 0; background: #f2e8d5; }
+      .signal i:nth-child(2n) { width: 58%; background: #e3513d; }
+      .copy { padding: 62px 54px; }
+      .copy p { margin: 0 0 20px; color: #8a321f; font-size: 16px; font-weight: 900; letter-spacing: 3px; }
+      h1 { max-width: 650px; margin: 0; font-family: Georgia, serif; font-size: 92px; font-weight: 500; line-height: .82; letter-spacing: -7px; }
+      .next { padding: 48px 38px; background: #e3513d; color: #fffaf1; display: flex; flex-direction: column; justify-content: center; }
+      .next span { font-size: 15px; font-weight: 900; letter-spacing: 3px; }
+      .next b { font-family: Georgia, serif; font-size: 190px; font-weight: 400; line-height: .85; }
+      .next small { margin-top: 26px; font-size: 17px; }
+    </style>
+  </head>
+  <body>
+    <header><span>YAP<strong>FEED</strong></span><span>58 SHORT PIECES READY</span></header>
+    <main>
+      <aside class="signal"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></aside>
+      <section class="copy"><p>CONTINUOUS PUBLIC-DOMAIN AUDIO</p><h1>Short audio.<br />Eyes off.</h1></section>
+      <aside class="next"><span>PRESS PLAY ONCE</span><b>→</b><small>Stories continue by themselves.</small></aside>
+    </main>
+  </body>
+</html>

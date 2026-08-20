@@ -86,6 +86,19 @@ export function sleepCheckDelay(
   return Math.max(0, Math.min(maximumDelay, deadline - now));
 }
 
+export function clipStartOffset(clip: Clip): number {
+  const start = clip.startOffsetS;
+  return start !== undefined && Number.isFinite(start) && start > 0 ? start : 0;
+}
+
+// An imported podcast slice covers one span of a longer recording, so playback
+// stops at its end offset instead of running into the next slice.
+export function isPastClipEnd(currentTime: number, clip: Clip): boolean {
+  const end = clip.endOffsetS;
+  if (end === undefined || !Number.isFinite(end) || end <= clipStartOffset(clip)) return false;
+  return Number.isFinite(currentTime) && currentTime >= end;
+}
+
 export function registerMediaSessionHandlers(
   session: MediaSessionPort | undefined,
   controls: PlayerControls,

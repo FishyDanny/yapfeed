@@ -1,5 +1,7 @@
 import type {
   ClipsResponse,
+  FeedImportInput,
+  FeedImportResponse,
   PlayEventInput,
   SubmissionInput,
   SubmissionResponse,
@@ -46,4 +48,8 @@ export async function recordPlay(input: PlayEventInput): Promise<void> {
 
 export function submitClip(input: SubmissionInput): Promise<SubmissionResponse> {
   return requestJson<SubmissionResponse>('/api/submissions', jsonRequest(input));
+}
+
+export function importFeed(input: FeedImportInput): Promise<FeedImportResponse> {
+  return requestJson<FeedImportResponse>('/api/imports', jsonRequest(input));
 }

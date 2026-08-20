@@ -176,6 +176,40 @@ test('saves the pieces that play next for offline listening', async ({ page }) =
     .toBe('blob:');
 });
 
+test('imports a podcast feed and reports the queued parts', async ({ page }) => {
+  test.skip(usesLiveApi, 'Importing a live feed would queue real submissions for review.');
+  let importBody: unknown;
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    if (request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ clips }) });
+      return;
+    }
+    if (request.url().endsWith('/api/imports')) {
+      importBody = request.postDataJSON();
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ imported: 12, skipped: 0, episodes: 3, status: 'pending' }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ recorded: true }) });
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Submit a clip' }).click();
+  await page.getByLabel('Podcast feed address').fill('https://fieldandtape.example/rss');
+  await page.getByLabel('Email for the import').fill('listener@example.com');
+  await page.getByRole('button', { name: 'Import and slice' }).click();
+
+  await expect(page.getByText('Queued 12 parts from 3 episodes for review.')).toBeVisible();
+  expect(importBody).toEqual({
+    feedUrl: 'https://fieldandtape.example/rss',
+    submitterEmail: 'listener@example.com',
+  });
+});
+
 test('queues a one-minute contribution for human review', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const request = route.request();

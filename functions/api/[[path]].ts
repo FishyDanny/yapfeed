@@ -1,4 +1,11 @@
 import { parsePlayEvent, parseSubmission, ValidationError } from '../../src/server/domain';
+import {
+  assertSafeFeedUrl,
+  MAXIMUM_FEED_BYTES,
+  parseFeedImport,
+  parsePodcastFeed,
+  sliceFeed,
+} from '../../src/server/podcast';
 
 interface Env {
   DB: D1Database;
@@ -9,6 +16,8 @@ interface ClipRow {
   title: string;
   source_url: string;
   duration_s: number;
+  start_offset_s: number | null;
+  end_offset_s: number | null;
   licence: string;
   attribution: string;
   source: string;
@@ -57,7 +66,8 @@ async function readJson(request: Request): Promise<unknown> {
 
 async function clips(env: Env): Promise<Response> {
   const result = await env.DB.prepare(
-    `SELECT id, title, source_url, duration_s, licence, attribution, source
+    `SELECT id, title, source_url, duration_s, start_offset_s, end_offset_s,
+            licence, attribution, source
      FROM yapfeed_clips
      WHERE status = 'approved'
      ORDER BY id`,
@@ -73,6 +83,10 @@ async function clips(env: Env): Promise<Response> {
         licence: row.licence,
         attribution: row.attribution,
         source: row.source,
+        ...(row.start_offset_s === null || row.start_offset_s === 0
+          ? {}
+          : { startOffsetS: row.start_offset_s }),
+        ...(row.end_offset_s === null ? {} : { endOffsetS: row.end_offset_s }),
       })),
     },
     200,
@@ -98,17 +112,82 @@ async function recordPlay(request: Request, env: Env): Promise<Response> {
   return jsonResponse({ recorded: true }, 201);
 }
 
+const INSERT_SUBMISSION = `INSERT INTO yapfeed_submissions
+   (id, submitter_email, url_or_key, duration_s, note, status)
+   VALUES (?, ?, ?, ?, ?, 'pending')`;
+
+async function isAwaitingReview(env: Env, urlOrKey: string): Promise<boolean> {
+  const existing = await env.DB.prepare(
+    "SELECT id FROM yapfeed_submissions WHERE url_or_key = ? AND status = 'pending'",
+  )
+    .bind(urlOrKey)
+    .first<IdRow>();
+  return existing !== null;
+}
+
 async function submit(request: Request, env: Env): Promise<Response> {
   const input = parseSubmission(await readJson(request));
+  if (await isAwaitingReview(env, input.urlOrKey)) {
+    throw new HttpError(409, 'That audio URL is already waiting for review.');
+  }
   const id = crypto.randomUUID();
-  await env.DB.prepare(
-    `INSERT INTO yapfeed_submissions
-     (id, submitter_email, url_or_key, duration_s, note, status)
-     VALUES (?, ?, ?, ?, ?, 'pending')`,
-  )
+  await env.DB.prepare(INSERT_SUBMISSION)
     .bind(id, input.submitterEmail, input.urlOrKey, input.durationS, input.note)
     .run();
   return jsonResponse({ id, status: 'pending' }, 201);
+}
+
+async function readFeed(feedUrl: URL): Promise<string> {
+  let response: Response;
+  try {
+    response = await fetch(feedUrl.toString(), {
+      // A redirect is a way around the public-host check, so it ends the read.
+      redirect: 'error',
+      headers: { Accept: 'application/rss+xml, application/xml;q=0.9, text/xml;q=0.8' },
+    });
+  } catch {
+    throw new HttpError(502, 'That feed could not be reached.');
+  }
+  if (!response.ok) throw new HttpError(502, 'That feed could not be read.');
+  const declaredLength = Number(response.headers.get('Content-Length') ?? '0');
+  if (Number.isFinite(declaredLength) && declaredLength > MAXIMUM_FEED_BYTES) {
+    throw new HttpError(413, 'That feed is too large to import.');
+  }
+  const xml = await response.text();
+  if (xml.length > MAXIMUM_FEED_BYTES) {
+    throw new HttpError(413, 'That feed is too large to import.');
+  }
+  return xml;
+}
+
+async function importFeed(request: Request, env: Env): Promise<Response> {
+  const input = parseFeedImport(await readJson(request));
+  const feed = parsePodcastFeed(await readFeed(assertSafeFeedUrl(input.feedUrl)));
+  const slices = sliceFeed(feed);
+
+  let imported = 0;
+  let skipped = 0;
+  for (const slice of slices) {
+    if (await isAwaitingReview(env, slice.sourceUrl)) {
+      skipped += 1;
+      continue;
+    }
+    await env.DB.prepare(INSERT_SUBMISSION)
+      .bind(
+        crypto.randomUUID(),
+        input.submitterEmail,
+        slice.sourceUrl,
+        slice.durationS,
+        `${slice.title} — ${slice.attribution}`.slice(0, 1_000),
+      )
+      .run();
+    imported += 1;
+  }
+
+  return jsonResponse(
+    { imported, skipped, episodes: feed.episodes.length, status: 'pending' },
+    201,
+  );
 }
 
 async function health(env: Env): Promise<Response> {
@@ -124,6 +203,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (pathname === '/api/clips' && request.method === 'GET') return clips(env);
   if (pathname === '/api/plays' && request.method === 'POST') return recordPlay(request, env);
   if (pathname === '/api/submissions' && request.method === 'POST') return submit(request, env);
+  if (pathname === '/api/imports' && request.method === 'POST') return importFeed(request, env);
   throw new HttpError(404, 'API route not found.');
 }
 

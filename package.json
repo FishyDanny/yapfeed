@@ -1,0 +1,31 @@
+{
+  "name": "@ship72/yapfeed",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "og": "node scripts/generate-og.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:seed": "vitest run scripts/fetch-seed.test.mjs",
+    "test:quality": "vitest run scripts/quality.test.mjs",
+    "lint": "node scripts/lint.mjs",
+    "check:generic": "node scripts/check-generic.mjs",
+    "smoke": "playwright test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm check:generic"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260815.1",
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/node": "^24.13.3",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.123.0"
+  }
+}

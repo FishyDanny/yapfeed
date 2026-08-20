@@ -1,0 +1,8 @@
+name = "s72-yapfeed"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-08-15"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ship72"
+database_id = "f618bb0f-194a-4abf-8511-49689b6cc8d5"
